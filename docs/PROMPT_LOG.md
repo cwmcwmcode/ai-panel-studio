@@ -4,8 +4,8 @@
 | --- | --- |
 | 项目 | AI Panel Studio（AI 圆桌讨论演播厅） |
 | 记录时间 | 2026-11-17 |
-| 阶段标记 | 第一阶段：【SDD 阶段】数据建模与 API 契约生成<br/>第二阶段：【TDD 阶段】核心调度逻辑的测试用例编写与业务实现<br/>第三阶段：【DDD 阶段】前端组件与页面生成<br/>第四阶段：【Integration 阶段】流式全链路联调与并发隔离 |
-| 产出物 | PRD.md · schema.sql · ARCHITECTURE.md · API.md · tests/test_scheduler.py · tests/test_insight.py · services/scheduler.py · services/insight_extractor.py · services/llm_service.py · services/room_manager.py · api/routes.py · db/database.py · main.py · frontend/src/api/client.js · frontend/src/components/* · frontend/src/stores/studioStore.js |
+| 阶段标记 | 第一阶段：【SDD 阶段】数据建模与 API 契约生成<br/>第二阶段：【TDD 阶段】核心调度逻辑的测试用例编写与业务实现<br/>第三阶段：【DDD 阶段】前端组件与页面生成<br/>第四阶段：【Integration 阶段】流式全链路联调与并发隔离<br/>第五阶段：【E2E 阶段】系统级端到端测试与质量闭环 |
+| 产出物 | PRD.md · schema.sql · ARCHITECTURE.md · API.md · tests/test_scheduler.py · tests/test_insight.py · tests/test_e2e.py · scripts/seed_data.py · services/scheduler.py · services/insight_extractor.py · services/llm_service.py · services/room_manager.py · utils/sanitizer.py · api/routes.py · db/database.py · main.py · frontend/src/api/client.js · frontend/src/components/* · frontend/src/stores/studioStore.js |
 
 ---
 
@@ -256,5 +256,63 @@ DiscussionSetupModal.vue（议题配置弹窗）：
 ## 4. 挑战与 AI 引导过程
 
 初版实现中，客户端刷新或断线后生成器未被及时释放，容易造成后端协程挂死；同时 SSE 响应缺少强制刷新与心跳，代理缓冲会让文字出现明显卡顿。通过引导 AI 在事件生成器中加入异步心跳保活、断开检测与 `finally` 释放逻辑，并统一关闭响应缓冲，最终保证了长链路流式交互的稳定性。
+
+---
+
+# 第五阶段记录
+
+## 1. 阶段标记
+
+**【E2E 阶段】系统级端到端测试与质量闭环**
+
+本阶段补齐交付前的质量闭环：用纯自然语言脱敏器清洗全链路输出，预置 5 场开箱即用的深度圆桌样例，并以 `pytest` + `httpx.AsyncClient` 跑通「创建议题 → 阵容契约 → SSE 事件流 → 数据库终态」的完整验收链路。
+
+| 校验项 | 结果 |
+| --- | --- |
+| 样例数据注入 | 新增 5 个房间，每场 1 主持 + 4 专家、10 条速记、4 条看板；重复执行输出「跳过 5 场（幂等）」 |
+| 端到端测试 | `pytest backend/tests/test_e2e.py -v`：`1 passed in 4.63s` |
+| 全量回归 | `pytest backend/tests -q`：`8 passed in 5.06s`（原有 7 条无回归） |
+| 输出脱敏 | 脏输入（json 代码围栏 + `{"summary": ...}`）清洗后仅剩纯自然语言；`[举手]`、`系统通知:` 零残留；公开摘要 ≤ 15 字 |
+
+---
+
+## 2. 原始 Prompt（完整原文）
+
+```text
+你现在是一个资深全栈 QA 专家与数据架构师。我们进入第五阶段：【E2E 阶段（端到端测试与质量闭环）】。
+请针对作业要求的验收标准，完成输出清洗、5 组样例数据注入以及端到端集成测试：
+1.全链路输出脱敏与去 JSON 化过滤器（backend/app/utils/sanitizer.py）：
+总结词清洗：编写鲁棒的自然语言提取函数。若大模型总结返回了带 markdown 标记的代码块（如 json {"summary": "..."}）或带有 JSON 键值对，通过正则与解析器强行剥离，100% 确保返回给前端的是一段富有演播厅感染力的纯自然语言总结陈词；
+对白流净化：过滤掉大模型可能夹带的内部控制字符（如 [举手]、[反驳]、系统通知: 等），确保现场 Transcript 只呈现干净的发言正文；
+思维链隐藏：专家小窗的思考状态只保留 15 字以内的公开观点摘要，严禁暴露大模型的原始推理思维链（CoT）。
+2.预置 5 组高质量演播厅样例数据（backend/scripts/seed_data.py）：
+编写独立的数据库初始化灌库脚本，向 SQLite 中注入 5 场高深度、高对抗性的真实完整圆桌讨论（包含完整的房间、主持人 + 4 位专家、至少 8~10 轮精彩对白速记、以及提取好的共识与分歧看板数据）：
+样例 1（科技伦理）：《通用人工智能（AGI）若具备自主意识，是否应享有基础数字人权？》
+样例 2（商业战略）：《中小企业自研垂直大模型是自寻死路，还是建立护城河的唯一解？》
+样例 3（教育科技）：《当 AI 能秒解考题并提供 1 对 1 教学，公立学校教育体系该去向何方？》
+样例 4（劳动力市场）：《程序员职业的黄昏？初级开发人员在 3 年内会被 AI Agent 彻底替代吗？》
+样例 5（前沿哲学）：《脑机接口全面普及后，“记忆共享与重组”是否会终结人类个体的独立存在？》
+确保新部署的数据库一键运行 python backend/scripts/seed_data.py 即可拥有开箱即用的完整展示数据。
+3.系统级端到端测试（backend/tests/test_e2e.py）：
+使用 pytest 和 httpx.AsyncClient 编写异步端到端测试：
+完整测试链：创建议题 -> 验证生成的 1 主持人 + 4 专家数据契约 -> 启动房间 -> 校验 SSE 事件流各消息包格式（token、status_change、insight_update、summary、done）无乱码与 JSON 泄露 -> 校验数据库最终持久化状态。
+4.在终端执行数据注入并在虚拟环境中运行测试：
+执行 backend\venv\Scripts\python backend/scripts/seed_data.py
+执行 backend\venv\Scripts\pytest backend/tests/test_e2e.py，确保端到端测试全部通过（PASSED）。
+请创建并编写上述代码，完成数据灌装与端到端质检。
+```
+
+---
+
+## 3. 设计意图
+
+执行系统级端到端验收测试，以临时 SQLite 与真实 SSE 长连接串起 REST 契约、事件帧格式与数据库终态的完整闭环；同时编写严格的数据清洗过滤器杜绝 JSON 泄露与思维链暴露，并注入 5 组覆盖科技、商业与哲学的深度圆桌数据作为开箱即用样例。
+
+---
+
+## 4. 挑战与 AI 引导过程
+
+大模型在执行阶段总结时极易输出 markdown 代码块包裹的 JSON 字符串，直接透传会破坏前端终结卡片的排版；引导 AI 在后端设计基于正则与降级容错的 Sanitizer 清洗器，先提取 `summary` 字段再逐层剥离围栏、键名与结构符号，并对空结果回退到演播厅陈词。清洗器同时接入阵容、流式发言、洞察与总结四条出站路径，成功保障了演播厅总结 100% 呈现富有演讲感的纯自然语言。
+
 
 

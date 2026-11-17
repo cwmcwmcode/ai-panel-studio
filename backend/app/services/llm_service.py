@@ -30,6 +30,13 @@ from app.services.insight_extractor import (
     InsightBoard,
     InsightExtractor,
 )
+from app.utils.sanitizer import (
+    StreamingSanitizer,
+    sanitize_focus,
+    sanitize_insight,
+    sanitize_summary,
+    sanitize_transcript,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +243,10 @@ class LLMService:
                 ),
                 "stance_side": "neutral",
                 "is_host": True,
-                "focus": self._clip(host_source.get("focus") or "串联观点并收束结论", 120),
+                "focus": sanitize_focus(
+                    host_source.get("focus") or "串联观点并收束结论"
+                )
+                or "串联观点并收束结论",
                 "color_theme": HOST_COLOR_POOL[0],
             }
         ]
@@ -259,9 +269,10 @@ class LLMService:
                     "stance": self._clip(source.get("stance") or "持中立观察立场", 200),
                     "stance_side": side,
                     "is_host": False,
-                    "focus": self._clip(
-                        source.get("focus") or "关注议题的关键分歧", 120
-                    ),
+                    "focus": sanitize_focus(
+                        source.get("focus") or "关注议题的关键分歧"
+                    )
+                    or "关注议题的关键分歧",
                     "color_theme": color,
                 }
             )
@@ -279,7 +290,9 @@ class LLMService:
     ) -> AsyncIterator[str]:
         """流式产出一次短发言的增量文本。"""
         if self.demo_mode or self._async_client is None:
-            text = self._mock_speech(topic, persona, history, speech_type)
+            text = sanitize_transcript(
+                self._mock_speech(topic, persona, history, speech_type)
+            )
             async for chunk in self._chunk_text(text):
                 yield chunk
             return
@@ -292,6 +305,7 @@ class LLMService:
             type_hint=self._type_hint(speech_type),
             context=self._format_context(history),
         )
+        sanitizer = StreamingSanitizer()
         started = False
         try:
             stream = await self._async_client.chat.completions.create(
@@ -303,14 +317,19 @@ class LLMService:
             )
             async for chunk in stream:
                 delta = chunk.choices[0].delta.content if chunk.choices else None
-                if delta:
+                if not delta:
+                    continue
+                cleaned = sanitizer.feed(delta)
+                if cleaned:
                     started = True
-                    yield delta
+                    yield cleaned
         except Exception:
             logger.warning("LLM 流式发言失败，切换为演示文本", exc_info=True)
 
         if not started:
-            text = self._mock_speech(topic, persona, history, speech_type)
+            text = sanitize_transcript(
+                self._mock_speech(topic, persona, history, speech_type)
+            )
             async for chunk in self._chunk_text(text):
                 yield chunk
 
@@ -374,7 +393,7 @@ class LLMService:
             return InsightBoard()
 
         if self.demo_mode or self._async_client is None:
-            return self._mock_insights(topic, turns)
+            return self._clean_board(self._mock_insights(topic, turns))
 
         try:
             raw = await self._complete(
@@ -382,10 +401,25 @@ class LLMService:
             )
             # 复用 TDD 阶段已测通的解析与清洗逻辑
             extractor = InsightExtractor(lambda _prompt: raw)
-            return extractor.extract(turns)
+            return self._clean_board(extractor.extract(turns))
         except Exception:
             logger.warning("洞察提炼失败，使用演示结果", exc_info=True)
-            return self._mock_insights(topic, turns)
+            return self._clean_board(self._mock_insights(topic, turns))
+
+    @staticmethod
+    def _clean_board(board: InsightBoard) -> InsightBoard:
+        """对白脱敏后再出站，杜绝舞台提示与模型标记进入看板。"""
+        consensus: list[str] = []
+        divergence: list[str] = []
+        for item in board.consensus:
+            cleaned = sanitize_insight(item)
+            if cleaned and cleaned not in consensus:
+                consensus.append(cleaned)
+        for item in board.divergence:
+            cleaned = sanitize_insight(item)
+            if cleaned and cleaned not in divergence:
+                divergence.append(cleaned)
+        return InsightBoard(consensus=consensus, divergence=divergence)
 
     def _insight_prompt(self, turns: Sequence[DialogueTurn]) -> str:
         transcript = "\n".join(f"{turn.speaker}：{turn.content}" for turn in turns)
@@ -441,13 +475,22 @@ class LLMService:
                     max_tokens=700,
                 )
                 payload = self._parse_object(raw)
-                summary = self._clip(str(payload.get("summary") or ""), 600)
-                if summary:
+                raw_summary = str(payload.get("summary") or "")
+                if raw_summary.strip():
                     return {
-                        "summary": summary,
-                        "consensus": self._as_text_list(payload.get("consensus")),
-                        "divergence": self._as_text_list(payload.get("divergence")),
-                        "suggestions": self._as_text_list(payload.get("suggestions")),
+                        "summary": sanitize_summary(raw_summary),
+                        "consensus": [
+                            sanitize_insight(item)
+                            for item in self._as_text_list(payload.get("consensus"))
+                        ],
+                        "divergence": [
+                            sanitize_insight(item)
+                            for item in self._as_text_list(payload.get("divergence"))
+                        ],
+                        "suggestions": [
+                            sanitize_insight(item)
+                            for item in self._as_text_list(payload.get("suggestions"))
+                        ],
                     }
             except Exception:
                 logger.warning("LLM 总结生成失败，使用演示总结", exc_info=True)
@@ -469,9 +512,9 @@ class LLMService:
             "建议先用一条业务线做小范围试点，用数据验证后再决定下一步。"
         )
         return {
-            "summary": self._clip(summary, 600),
-            "consensus": consensus[:3],
-            "divergence": divergence[:3],
+            "summary": sanitize_summary(self._clip(summary, 600)),
+            "consensus": [sanitize_insight(item) for item in consensus[:3]],
+            "divergence": [sanitize_insight(item) for item in divergence[:3]],
             "suggestions": [
                 "先用绞杀者模式试点一条业务线",
                 "为拆分设定可量化的成功标准",

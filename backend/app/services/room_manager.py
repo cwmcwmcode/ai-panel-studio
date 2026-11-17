@@ -28,6 +28,12 @@ from app.services.scheduler import (
     SpeechScheduler,
     SpeechValidationError,
 )
+from app.utils.sanitizer import (
+    sanitize_focus,
+    sanitize_insight,
+    sanitize_summary,
+    sanitize_transcript,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,11 +238,12 @@ class RoomManager:
         status: str,
         focus: str | None = None,
     ) -> None:
+        safe_focus = sanitize_focus(focus) if focus else None
         persona["status"] = status
-        if focus:
-            persona["focus"] = focus
+        if safe_focus:
+            persona["focus"] = safe_focus
         await database.update_persona_status(
-            runtime.room_id, int(persona["id"]), status, focus
+            runtime.room_id, int(persona["id"]), status, safe_focus
         )
         await self._broadcast(
             runtime,
@@ -349,7 +356,7 @@ class RoomManager:
             )
             token_index += 1
 
-        raw = "".join(buffer).strip()
+        raw = sanitize_transcript("".join(buffer))
         if validate:
             try:
                 content = runtime.scheduler.validate_speech(raw)
@@ -357,6 +364,7 @@ class RoomManager:
                 content = self._safe_fallback(raw, persona)
         else:
             content = raw or "欢迎来到演播厅，本场讨论正式开始。"
+        content = sanitize_transcript(content) or self._safe_fallback("", persona)
 
         row = await database.insert_transcript(
             runtime.room_id, int(persona["id"]), sequence, content, speech_type
@@ -390,7 +398,7 @@ class RoomManager:
 
     @staticmethod
     def _safe_fallback(raw: str, persona: dict[str, Any]) -> str:
-        text = raw.strip() or f"{persona['name']}认为需要更多数据才能判断。"
+        text = sanitize_transcript(raw) or f"{persona['name']}认为需要更多数据才能判断。"
         if len(text) < 20:
             text = f"{text}，这是我基于当前信息能给出的判断。"
         if len(text) > 80:
@@ -411,8 +419,18 @@ class RoomManager:
 
         runtime.insight_version += 1
         runtime.board = board
-        items = [{"type": "consensus", "content": text} for text in board.consensus]
-        items += [{"type": "divergence", "content": text} for text in board.divergence]
+        items = [
+            {"type": "consensus", "content": text}
+            for text in (sanitize_insight(item) for item in board.consensus)
+            if text
+        ]
+        items += [
+            {"type": "divergence", "content": text}
+            for text in (sanitize_insight(item) for item in board.divergence)
+            if text
+        ]
+        if not items:
+            return
         saved = await database.save_insights(runtime.room_id, runtime.insight_version, items)
 
         await self._broadcast(
@@ -434,7 +452,22 @@ class RoomManager:
         result = await self._llm.generate_summary(
             runtime.topic, runtime.dialogue(), runtime.board
         )
-        summary_text = result["summary"]
+        summary_text = sanitize_summary(result.get("summary") or "")
+        consensus = [
+            text
+            for text in (sanitize_insight(item) for item in result.get("consensus") or [])
+            if text
+        ] or list(runtime.board.consensus)
+        divergence = [
+            text
+            for text in (sanitize_insight(item) for item in result.get("divergence") or [])
+            if text
+        ] or list(runtime.board.divergence)
+        suggestions = [
+            text
+            for text in (sanitize_insight(item) for item in result.get("suggestions") or [])
+            if text
+        ]
 
         await database.finish_room(runtime.room_id, summary_text)
         await self._set_status(runtime, host, "speaking", "收束全场观点")
@@ -498,9 +531,9 @@ class RoomManager:
                 "persona_id": int(host["id"]),
                 "transcript_id": int(row["id"]),
                 "summary": summary_text,
-                "consensus": result.get("consensus") or runtime.board.consensus,
-                "divergence": result.get("divergence") or runtime.board.divergence,
-                "suggestions": result.get("suggestions") or [],
+                "consensus": consensus,
+                "divergence": divergence,
+                "suggestions": suggestions,
                 "finished_at": database.utc_now(),
             },
             event_id=sequence,
