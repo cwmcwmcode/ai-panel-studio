@@ -4,8 +4,8 @@
 | --- | --- |
 | 项目 | AI Panel Studio（AI 圆桌讨论演播厅） |
 | 记录时间 | 2026-11-17 |
-| 阶段标记 | 第一阶段：【SDD 阶段】数据建模与 API 契约生成<br/>第二阶段：【TDD 阶段】核心调度逻辑的测试用例编写与业务实现<br/>第三阶段：【DDD 阶段】前端组件与页面生成 |
-| 产出物 | PRD.md · schema.sql · ARCHITECTURE.md · API.md · tests/test_scheduler.py · tests/test_insight.py · services/scheduler.py · services/insight_extractor.py · frontend/src/components/* · frontend/src/stores/studioStore.js |
+| 阶段标记 | 第一阶段：【SDD 阶段】数据建模与 API 契约生成<br/>第二阶段：【TDD 阶段】核心调度逻辑的测试用例编写与业务实现<br/>第三阶段：【DDD 阶段】前端组件与页面生成<br/>第四阶段：【Integration 阶段】流式全链路联调与并发隔离 |
+| 产出物 | PRD.md · schema.sql · ARCHITECTURE.md · API.md · tests/test_scheduler.py · tests/test_insight.py · services/scheduler.py · services/insight_extractor.py · services/llm_service.py · services/room_manager.py · api/routes.py · db/database.py · main.py · frontend/src/api/client.js · frontend/src/components/* · frontend/src/stores/studioStore.js |
 
 ---
 
@@ -194,5 +194,67 @@ DiscussionSetupModal.vue（议题配置弹窗）：
 ## 4. 挑战与 AI 引导过程
 
 初版页面最容易出现的问题是内容随对白增长把整个文档撑高，产生全局主滚动条并导致三栏布局塌陷、头部与按钮被顶出视口。引导时明确施加 `h-screen overflow-hidden flex flex-col` 的根容器约束，并让三栏各自成为 `min-h-0` 的独立滚动容器（`overflow-y-auto` + 细滚动条），中间对白流再叠加自动吸底与「回到最新」逻辑，最终用浏览器实测确认 `scrollHeight == clientHeight`，达成电视台导播台级别的全屏响应式交互。
+
+---
+
+# 第四阶段记录
+
+## 1. 阶段标记
+
+**【Integration 阶段】流式全链路联调与并发隔离**
+
+本阶段把 TDD 阶段测通的调度器与洞察提炼器接入 FastAPI，通过 SSE 长连接把真实讨论进程推送到 Vue 3 演播厅，并以 `room_id` 为键隔离多个房间的运行态与广播队列。
+
+| 校验项 | 结果 |
+| --- | --- |
+| 后端单元测试 | `pytest -q`：`7 passed` |
+| 单房间流式全链路 | 248 个 `token` / 10 次 `speech_end` / 3 次 `insight_update` / 1 次 `summary` + `done` |
+| 双房间并发隔离 | 两场讨论同时运行，事件 `room_id` 错配数 `wrong_room = 0` |
+| 前端生产构建 | `npm run build` 成功 |
+| 浏览器实操 | 发起讨论 → 速记增长 → 洞察刷新 → 总结大卡片，全流程 PASS |
+
+---
+
+## 2. 原始 Prompt（完整原文）
+
+```text
+你现在是一个精通异步高并发与 LLM 流式通信的全栈技术专家。我们进入第四阶段：【Integration 阶段（前后端流式联调与并发隔离）】。
+请将已在 TDD 阶段测通的核心调度逻辑（scheduler.py、insight_extractor.py）与前端演播厅界面（Vue 3）通过 FastAPI 和 SSE 流式通道全面打通：
+1.后端数据库与环境配置：
+在 backend/requirements.txt 中追加：fastapi>=0.100.0、uvicorn>=0.23.0、aiosqlite>=0.19.0、python-dotenv>=1.0.0、openai>=1.0.0、httpx>=0.24.0；
+创建 backend/.env.example 与 backend/.env（配置 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL）；
+编写 backend/app/db/database.py：基于 aiosqlite 异步连接 SQLite（数据文件存放在 backend/data/panel_studio.db），启动时自动执行 schema.sql 建表。
+2.后端核心服务与 SSE 引擎（支持多房间隔离）：
+编写 backend/app/services/llm_service.py：
+封装动态生成阵容（主持人 + N 位鲜明立场专家，按颜色规范生成色标）；
+封装根据当前讨论上下文流式生成单次短发言（严格限制 1-2 句核心观点）；
+针对无 API Key 场景内置自测演示模式（Mock Stream），保证离线状态也能跑通完整流式打字机交互；
+编写 backend/app/services/room_manager.py：
+维护房间运行状态机，以 room_id 为键维护独立的 asyncio.Queue 广播队列，确保多个讨论房间并发运行完全物理隔离、互不干扰；
+调度循环：主持人开场 -> 调度器选拔专家交锋 -> 实时提取共识分歧 -> 达到预设轮次由主持人自然语言陈词总结 -> 广播 done 结束事件。
+3.后端 REST 与 SSE 路由（backend/app/api/routes.py）：
+实现 GET /api/rooms、POST /api/rooms、GET /api/rooms/{id}、POST /api/rooms/{id}/start；
+实现 GET /api/rooms/{id}/events：返回 StreamingResponse(..., media_type='text/event-stream')，严格发送符合 SDD 规范的 5 种标准事件（token, status_change, insight_update, speech_end, summary, done），并处理客户端异常断开时的协程优雅释放。
+4.前端状态联调与流式打字机消费：
+替换前端原有的静态 Mock 数据，编写 frontend/src/api/ 网络请求层；
+在演播厅页面中使用 fetch 结合流式读取器（response.body.getReader()）解析 SSE 流：
+收到 token 事件：在当前发言专家气泡中呈现流畅打字机效果，中间对白流自动平滑滚动吸底；
+收到 status_change 事件：即时更新对应专家的呼吸灯状态（idle/thinking/speaking）；
+收到 insight_update 事件：右侧共识与分歧卡片以动画平滑更新；
+收到 summary 事件：弹出演播厅终结大卡片，展示主持人的自然语言总结词。
+请在当前工程中完整编写并更新前后端代码，解决 CORS 跨域问题，确保启动后可以真正发起一场实时圆桌讨论。
+```
+
+---
+
+## 3. 设计意图
+
+本阶段将 FastAPI 的异步 SSE 事件流与 Vue 3 前端的流式读取渲染器直接对接，让 token、状态、洞察与总结事件在同一条长连接内按序抵达并由前端即时呈现。后端以 `room_id` 为键维护独立的 `asyncio.Queue` 与运行态，使多场圆桌讨论在调度、历史与广播层面完全物理隔离、并发互不干扰。
+
+---
+
+## 4. 挑战与 AI 引导过程
+
+初版实现中，客户端刷新或断线后生成器未被及时释放，容易造成后端协程挂死；同时 SSE 响应缺少强制刷新与心跳，代理缓冲会让文字出现明显卡顿。通过引导 AI 在事件生成器中加入异步心跳保活、断开检测与 `finally` 释放逻辑，并统一关闭响应缓冲，最终保证了长链路流式交互的稳定性。
 
 

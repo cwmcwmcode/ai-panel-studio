@@ -1,20 +1,17 @@
 <script setup>
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onBeforeUnmount } from 'vue'
 import StudioHeader from './components/StudioHeader.vue'
 import PersonaCard from './components/PersonaCard.vue'
 import LiveTranscript from './components/LiveTranscript.vue'
 import InsightBoard from './components/InsightBoard.vue'
 import DiscussionSetupModal from './components/DiscussionSetupModal.vue'
+import SummaryCard from './components/SummaryCard.vue'
 import { useStudioStore } from './stores/studioStore'
 
 const store = useStudioStore()
 
-onMounted(() => {
-  store.startSimulation()
-})
-
 onBeforeUnmount(() => {
-  store.stopSimulation()
+  store.dispose()
 })
 </script>
 
@@ -54,6 +51,9 @@ onBeforeUnmount(() => {
             :key="persona.id"
             :persona="persona"
           />
+          <p v-if="store.state.personas.length === 0" class="pt-16 text-center text-xs text-slate-600">
+            尚无阵容，请先发起讨论
+          </p>
         </div>
       </aside>
 
@@ -67,6 +67,33 @@ onBeforeUnmount(() => {
       />
     </main>
 
+    <!-- 操作提示 -->
+    <Transition
+      enter-active-class="transition duration-200"
+      enter-from-class="translate-y-2 opacity-0"
+      enter-to-class="translate-y-0 opacity-100"
+      leave-active-class="transition duration-150"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="store.state.notice"
+        class="pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full border border-slate-700 bg-slate-900/95 px-4 py-2 text-xs text-slate-200 shadow-xl backdrop-blur"
+      >
+        {{ store.state.notice }}
+      </div>
+    </Transition>
+
     <DiscussionSetupModal :open="store.state.modalOpen" @close="store.closeSetup()" />
+
+    <SummaryCard
+      :visible="store.state.summaryCard.visible"
+      :topic="store.state.room.topic"
+      :summary="store.state.summaryCard.summary"
+      :consensus="store.state.summaryCard.consensus"
+      :divergence="store.state.summaryCard.divergence"
+      :suggestions="store.state.summaryCard.suggestions"
+      @close="store.dismissSummary()"
+    />
   </div>
 </template>

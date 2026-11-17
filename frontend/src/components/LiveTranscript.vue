@@ -21,7 +21,10 @@ function onScroll() {
 }
 
 watch(
-  () => props.transcripts.length,
+  // token 增量不会改变数组长度，因此监听「总字符数 + 条数」保证持续吸底
+  () =>
+    props.transcripts.reduce((total, item) => total + (item.content?.length || 0), 0) +
+    props.transcripts.length,
   async () => {
     if (!stuck.value) return
     await nextTick()

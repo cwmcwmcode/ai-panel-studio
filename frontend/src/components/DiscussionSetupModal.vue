@@ -12,6 +12,8 @@ const store = useStudioStore()
 const topic = ref('')
 const expertCount = ref(4)
 const preview = ref([])
+const loading = ref(false)
+const error = ref('')
 
 const expertOptions = [3, 4, 5]
 const canGenerate = computed(() => topic.value.trim().length > 0)
@@ -19,24 +21,44 @@ const canGenerate = computed(() => topic.value.trim().length > 0)
 watch(
   () => props.open,
   (open) => {
-    if (open) preview.value = []
+    if (open) {
+      preview.value = []
+      error.value = ''
+    }
   }
 )
 
 watch([topic, expertCount], () => {
   preview.value = []
+  error.value = ''
 })
 
-function generatePreview() {
-  if (!canGenerate.value) return
-  preview.value = store.buildLineup(expertCount.value)
+async function generatePreview() {
+  if (!canGenerate.value || loading.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    preview.value = await store.previewLineup(topic.value, expertCount.value)
+  } catch (err) {
+    error.value = err.message || '生成阵容失败，请检查后端服务'
+  } finally {
+    loading.value = false
+  }
 }
 
-function confirmLineup() {
-  const lineup = preview.value.length ? preview.value : store.buildLineup(expertCount.value)
-  store.activateRoom(topic.value, lineup)
-  preview.value = []
-  emit('close')
+async function confirmLineup() {
+  if (!preview.value.length || loading.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    await store.confirmLineup()
+    preview.value = []
+    emit('close')
+  } catch (err) {
+    error.value = err.message || '启动讨论失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
 }
 
 function close() {
@@ -157,32 +179,39 @@ function close() {
         </div>
 
         <!-- 底部操作 -->
-        <div class="mt-6 flex items-center justify-end gap-3 border-t border-slate-800 pt-4">
-          <span v-if="!canGenerate" class="mr-auto text-[11px] text-slate-600">请先输入讨论议题</span>
-          <button
-            type="button"
-            class="rounded-lg border border-slate-700 px-3.5 py-2 text-xs text-slate-300 transition hover:border-slate-500 hover:text-white"
-            @click="close"
-          >
-            取消
-          </button>
-          <button
-            v-if="!preview.length"
-            type="button"
-            class="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
-            :disabled="!canGenerate"
-            @click="generatePreview"
-          >
-            生成阵容
-          </button>
-          <button
-            v-else
-            type="button"
-            class="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-emerald-400"
-            @click="confirmLineup"
-          >
-            确认阵容 · 进入演播厅
-          </button>
+        <div class="mt-6 border-t border-slate-800 pt-4">
+          <p v-if="error" class="mb-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">
+            {{ error }}
+          </p>
+          <div class="flex items-center justify-end gap-3">
+            <span v-if="!canGenerate" class="mr-auto text-[11px] text-slate-600">请先输入讨论议题</span>
+            <button
+              type="button"
+              class="rounded-lg border border-slate-700 px-3.5 py-2 text-xs text-slate-300 transition hover:border-slate-500 hover:text-white disabled:opacity-50"
+              :disabled="loading"
+              @click="close"
+            >
+              取消
+            </button>
+            <button
+              v-if="!preview.length"
+              type="button"
+              class="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="!canGenerate || loading"
+              @click="generatePreview"
+            >
+              {{ loading ? '正在生成阵容…' : '生成阵容' }}
+            </button>
+            <button
+              v-else
+              type="button"
+              class="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="loading"
+              @click="confirmLineup"
+            >
+              {{ loading ? '正在进入演播厅…' : '确认阵容 · 进入演播厅' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
