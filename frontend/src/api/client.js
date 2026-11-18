@@ -67,6 +67,19 @@ export function mapRoom(room) {
   }
 }
 
+export function mapTranscript(transcript) {
+  return {
+    id: transcript.sequence_no,
+    personaId: transcript.persona_id,
+    personaName: transcript.persona_name || '嘉宾',
+    color: transcript.color_theme || '#8B93A7',
+    isHost: Boolean(transcript.is_host),
+    speechType: transcript.speech_type || 'speech',
+    content: transcript.content || '',
+    time: transcript.created_at ? transcript.created_at.slice(11, 19) : '--:--:--'
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* REST                                                               */
 /* ------------------------------------------------------------------ */
@@ -95,6 +108,7 @@ export async function getRoom(roomId) {
   return {
     room: mapRoom(data.room),
     personas: (data.personas || []).map(mapPersona),
+    transcripts: (data.transcripts || []).map(mapTranscript),
     insights: data.insights,
     progress: data.progress
   }

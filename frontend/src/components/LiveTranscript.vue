@@ -2,7 +2,8 @@
 import { nextTick, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({
-  transcripts: { type: Array, default: () => [] }
+  transcripts: { type: Array, default: () => [] },
+  live: { type: Boolean, default: true }
 })
 
 const scroller = ref(null)
@@ -46,10 +47,18 @@ onMounted(async () => {
     <div class="flex shrink-0 items-center gap-3 border-b border-slate-800 px-5 py-3">
       <h2 class="text-[13px] font-semibold tracking-wide text-slate-200">现场实况</h2>
       <span
-        class="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300"
+        class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium"
+        :class="
+          live
+            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+            : 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+        "
       >
-        <span class="h-1.5 w-1.5 animate-breathe rounded-full bg-emerald-400"></span>
-        LIVE
+        <span
+          class="h-1.5 w-1.5 rounded-full"
+          :class="live ? 'animate-breathe bg-emerald-400' : 'bg-sky-400'"
+        ></span>
+        {{ live ? 'LIVE' : 'REPLAY' }}
       </span>
       <span class="ml-auto font-mono text-[11px] text-slate-500">{{ transcripts.length }} 条速记</span>
     </div>

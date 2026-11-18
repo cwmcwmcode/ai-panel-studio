@@ -155,16 +155,24 @@ class LLMService:
     def __init__(self) -> None:
         self.demo_mode = DEMO_MODE
         self._async_client = None
-        self._sync_client = None
-        if not self.demo_mode:
-            try:
-                from openai import AsyncOpenAI, OpenAI
+        if self.demo_mode:
+            logger.info("LLM_API_KEY 为空或仍为占位符，已启用 Mock 流式演示模式")
+            return
 
-                self._async_client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
-                self._sync_client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
-            except Exception:  # pragma: no cover - 依赖缺失时退回演示模式
-                logger.warning("初始化 LLM 客户端失败，已降级为演示模式", exc_info=True)
-                self.demo_mode = True
+        try:
+            from openai import AsyncOpenAI
+
+            # DeepSeek 与 OpenAI Chat Completions 协议兼容，仅需替换 base_url 与模型名
+            self._async_client = AsyncOpenAI(
+                api_key=LLM_API_KEY,
+                base_url=LLM_BASE_URL,
+                timeout=30.0,
+                max_retries=1,
+            )
+            logger.info("已启用真实大模型调用：%s @ %s", LLM_MODEL, LLM_BASE_URL)
+        except Exception:  # pragma: no cover - 依赖缺失时退回演示模式
+            logger.warning("初始化 LLM 客户端失败，已降级为演示模式", exc_info=True)
+            self.demo_mode = True
 
     # ------------------------------------------------------------------ #
     # 阵容生成

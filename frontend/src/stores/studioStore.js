@@ -2,6 +2,8 @@ import { computed, reactive } from 'vue'
 import {
   createRoom,
   finishRoom as finishRoomApi,
+  getRoom,
+  listRooms,
   startRoom as startRoomApi,
   streamRoomEvents
 } from '../api/client'
@@ -28,7 +30,14 @@ const state = reactive({
   insightVersion: 0,
   modalOpen: false,
   streaming: false,
+  readonly: false,
   notice: '',
+  history: {
+    open: false,
+    loading: false,
+    error: '',
+    items: []
+  },
   summaryCard: {
     visible: false,
     summary: '',
@@ -52,6 +61,18 @@ function formatClock(input) {
   const date = input ? new Date(input) : new Date()
   if (Number.isNaN(date.getTime())) return '--:--:--'
   return date.toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+function formatDateTime(input) {
+  const date = input ? new Date(input) : null
+  if (!date || Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
 }
 
 function personaById(id) {
@@ -253,8 +274,10 @@ async function confirmLineup() {
     id: room.id,
     topic: room.topic,
     status: 'active',
-    summary: ''
+    summary: '',
+    expertCount: room.expertCount || Math.max(1, personas.length - 1)
   }
+  state.readonly = false
   state.personas = personas.map((persona) => ({
     ...persona,
     status: 'idle',
@@ -293,6 +316,170 @@ function dismissSummary() {
   state.summaryCard.visible = false
 }
 
+/* ---------------------------------------------------------------- */
+/* 往期演播厅（历史回放）                                             */
+/* ---------------------------------------------------------------- */
+async function loadHistory() {
+  state.history.loading = true
+  state.history.error = ''
+  try {
+    const rooms = await listRooms()
+    state.history.items = (rooms || [])
+      .filter((room) => room.status === 'finished')
+      .map((room) => ({
+        id: room.id,
+        topic: room.topic,
+        status: room.status,
+        expertCount: room.expert_count,
+        finishedAt: room.finished_at,
+        finishedLabel: formatDateTime(room.finished_at),
+        summaryExcerpt: room.summary_excerpt || ''
+      }))
+  } catch (error) {
+    state.history.error = error.message || '加载往期讨论失败，请确认后端已启动'
+  } finally {
+    state.history.loading = false
+  }
+}
+
+function openHistory() {
+  state.history.open = true
+  loadHistory()
+}
+
+function closeHistory() {
+  state.history.open = false
+}
+
+/**
+ * 以只读方式载入一场已结题讨论：完整对白流 + 专家小窗 + 共识分歧 + 主持人总结词。
+ */
+async function enterArchivedRoom(room) {
+  if (!room?.id) return
+  state.history.loading = true
+  state.history.error = ''
+  try {
+    closeStream()
+    stopClock()
+    state.modalOpen = false
+
+    const detail = await getRoom(room.id)
+    const { version = 0, items = [] } = detail.insights || {}
+
+    state.room = {
+      id: detail.room.id,
+      topic: detail.room.topic,
+      status: detail.room.status,
+      summary: detail.room.summary || '',
+      expertCount: detail.room.expertCount,
+      finishedAt: detail.room.finishedAt
+    }
+    state.readonly = true
+    state.elapsedSeconds = 0
+    state.personas = detail.personas.map((persona) => ({
+      ...persona,
+      status: 'idle',
+      focus: persona.focus || '关注议题的关键分歧'
+    }))
+    state.insights = items.map((item) => ({
+      id: item.id,
+      type: item.type,
+      content: item.content,
+      version: item.version ?? version
+    }))
+    state.insightVersion = version
+    state.summaryCard = {
+      visible: false,
+      summary: '',
+      consensus: [],
+      divergence: [],
+      suggestions: []
+    }
+
+    const archived = detail.transcripts.map((item) => ({
+      ...item,
+      lastToken: -1,
+      streaming: false
+    }))
+    if (state.room.summary) {
+      archived.push({
+        id: 'summary',
+        personaId: null,
+        personaName: '主持人 · 收束陈词',
+        color: '#10B981',
+        isHost: true,
+        speechType: 'summary',
+        content: state.room.summary,
+        time: formatClock(state.room.finishedAt),
+        lastToken: -1,
+        streaming: false
+      })
+    }
+    transcriptMap.clear()
+    state.transcripts = archived
+
+    state.history.open = false
+    setNotice(`已载入《${state.room.topic}》的完整回放`)
+  } catch (error) {
+    state.history.error = error.message || '载入历史讨论失败'
+  } finally {
+    state.history.loading = false
+  }
+}
+
+/**
+ * 基于当前议题克隆一场新讨论，重新生成阵容并进入实时 SSE 推演。
+ */
+async function replayRoom() {
+  const topic = (state.room.topic || '').trim()
+  if (!topic || topic === '等待发起一场圆桌讨论') {
+    setNotice('当前没有可复用的议题')
+    return
+  }
+
+  closeStream()
+  stopClock()
+  try {
+    setNotice('正在基于该议题生成新阵容…')
+    const created = await createRoom({
+      topic,
+      expertCount: state.room.expertCount || 4,
+      style: 'debate'
+    })
+    draft = created
+    state.history.open = false
+    await confirmLineup()
+    setNotice('已基于该议题发起实时推演')
+  } catch (error) {
+    setNotice(error.message || '重新推演失败，请稍后重试')
+  }
+}
+
+/**
+ * 查看当前房间的主持人总结词（历史回放与实时结束场景共用）。
+ */
+function showSummary() {
+  if (!state.room.summary) {
+    setNotice('本场暂无可查看的总结词')
+    return
+  }
+  if (state.summaryCard.summary === state.room.summary) {
+    state.summaryCard.visible = true
+    return
+  }
+  state.summaryCard = {
+    visible: true,
+    summary: state.room.summary,
+    consensus: state.insights
+      .filter((item) => item.type === 'consensus')
+      .map((item) => item.content),
+    divergence: state.insights
+      .filter((item) => item.type === 'divergence')
+      .map((item) => item.content),
+    suggestions: []
+  }
+}
+
 function dispose() {
   closeStream()
   stopClock()
@@ -317,6 +504,12 @@ export function useStudioStore() {
     confirmLineup,
     finishRoom,
     dismissSummary,
+    loadHistory,
+    openHistory,
+    closeHistory,
+    enterArchivedRoom,
+    replayRoom,
+    showSummary,
     dispose
   }
 }

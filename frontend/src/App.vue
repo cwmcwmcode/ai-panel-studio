@@ -5,6 +5,7 @@ import PersonaCard from './components/PersonaCard.vue'
 import LiveTranscript from './components/LiveTranscript.vue'
 import InsightBoard from './components/InsightBoard.vue'
 import DiscussionSetupModal from './components/DiscussionSetupModal.vue'
+import HistoryDrawer from './components/HistoryDrawer.vue'
 import SummaryCard from './components/SummaryCard.vue'
 import { useStudioStore } from './stores/studioStore'
 
@@ -27,8 +28,12 @@ onBeforeUnmount(() => {
       :topic="store.state.room.topic"
       :status="store.state.room.status"
       :elapsed="store.elapsedLabel.value"
+      :readonly="store.state.readonly"
       @open-setup="store.openSetup()"
       @finish="store.finishRoom()"
+      @open-history="store.openHistory()"
+      @replay="store.replayRoom()"
+      @show-summary="store.showSummary()"
     />
 
     <!-- 三栏工作台：25% / 50% / 25%，各面板内部独立滚动 -->
@@ -58,7 +63,10 @@ onBeforeUnmount(() => {
       </aside>
 
       <!-- 中：现场实况 -->
-      <LiveTranscript :transcripts="store.state.transcripts" />
+      <LiveTranscript
+        :transcripts="store.state.transcripts"
+        :live="!store.state.readonly"
+      />
 
       <!-- 右：共识与分歧看板 -->
       <InsightBoard
@@ -83,6 +91,8 @@ onBeforeUnmount(() => {
         {{ store.state.notice }}
       </div>
     </Transition>
+
+    <HistoryDrawer :open="store.state.history.open" @close="store.closeHistory()" />
 
     <DiscussionSetupModal :open="store.state.modalOpen" @close="store.closeSetup()" />
 

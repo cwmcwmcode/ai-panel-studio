@@ -129,6 +129,7 @@ async def get_room(room_id: int) -> dict[str, Any]:
         raise _error(404, "ROOM_NOT_FOUND", "房间不存在", room_id=room_id)
 
     personas = await database.fetch_personas(room_id)
+    transcripts = await database.fetch_transcripts(room_id)
     progress = await database.fetch_progress(room_id)
     version, items = await database.fetch_latest_insights(room_id)
 
@@ -136,6 +137,20 @@ async def get_room(room_id: int) -> dict[str, Any]:
         {
             "room": _room_payload(room),
             "personas": [_persona_payload(persona) for persona in personas],
+            "transcripts": [
+                {
+                    "id": transcript["id"],
+                    "persona_id": transcript["persona_id"],
+                    "persona_name": transcript.get("persona_name") or "",
+                    "color_theme": transcript.get("color_theme") or "#8B93A7",
+                    "is_host": bool(transcript.get("is_host")),
+                    "sequence_no": transcript["sequence_no"],
+                    "content": transcript["content"],
+                    "speech_type": transcript["speech_type"],
+                    "created_at": transcript["created_at"],
+                }
+                for transcript in transcripts
+            ],
             "insights": {"version": version, "items": items},
             "progress": progress,
         }

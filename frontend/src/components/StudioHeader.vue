@@ -4,10 +4,11 @@ import { computed } from 'vue'
 const props = defineProps({
   topic: { type: String, required: true },
   status: { type: String, default: 'active' },
-  elapsed: { type: String, default: '00:00' }
+  elapsed: { type: String, default: '00:00' },
+  readonly: { type: Boolean, default: false }
 })
 
-defineEmits(['open-setup', 'finish'])
+defineEmits(['open-setup', 'finish', 'open-history', 'replay', 'show-summary'])
 
 const STATUS_META = {
   draft: {
@@ -51,14 +52,29 @@ const statusMeta = computed(() => STATUS_META[props.status] ?? STATUS_META.draft
       </div>
     </div>
 
-    <!-- 会议时长 -->
+    <!-- 会议时长 / 回放标识 -->
     <div class="hidden shrink-0 items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-1.5 md:flex">
-      <span class="text-[10px] uppercase tracking-widest text-slate-500">On Air</span>
-      <span class="font-mono text-sm tabular-nums text-slate-200">{{ elapsed }}</span>
+      <span class="text-[10px] uppercase tracking-widest text-slate-500">
+        {{ readonly ? 'Replay' : 'On Air' }}
+      </span>
+      <span
+        class="font-mono text-sm tabular-nums"
+        :class="readonly ? 'text-sky-300' : 'text-slate-200'"
+      >
+        {{ readonly ? '只读回放' : elapsed }}
+      </span>
     </div>
 
     <!-- 状态与操作 -->
-    <div class="flex shrink-0 items-center gap-3">
+    <div class="flex shrink-0 items-center gap-2.5">
+      <button
+        type="button"
+        class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-sky-500/60 hover:text-sky-200"
+        @click="$emit('open-history')"
+      >
+        往期演播厅
+      </button>
+
       <span
         class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium"
         :class="statusMeta.chip"
@@ -75,7 +91,25 @@ const statusMeta = computed(() => STATUS_META[props.status] ?? STATUS_META.draft
         发起新讨论
       </button>
 
+      <template v-if="status === 'finished'">
+        <button
+          type="button"
+          class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-sky-500/60 hover:text-sky-200"
+          @click="$emit('show-summary')"
+        >
+          查看总结词
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-emerald-400"
+          @click="$emit('replay')"
+        >
+          基于此议题重新推演
+        </button>
+      </template>
+
       <button
+        v-else
         type="button"
         class="rounded-lg bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
         :disabled="status !== 'active'"
