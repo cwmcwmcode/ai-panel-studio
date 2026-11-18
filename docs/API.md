@@ -223,8 +223,22 @@ GET /api/rooms/{id}
 ```json
 {
   "data": {
-    "room": { "id": 12, "status": "active", "summary": null },
+    "room": { "id": 12, "status": "finished", "summary": "本场讨论形成两点共识……" },
     "personas": [ ],
+    "transcripts": [
+      {
+        "id": 501,
+        "persona_id": 101,
+        "persona_name": "沈知远",
+        "color_theme": "#6C7A89",
+        "is_host": true,
+        "sequence_no": 1,
+        "content": "欢迎各位，今天我们讨论架构拆分的边界。",
+        "speech_type": "intro",
+        "created_at": "2026-11-17T08:30:05.001Z"
+      }
+    ],
+    "insights": { "version": 6, "items": [] },
     "progress": {
       "transcript_count": 18,
       "last_sequence_no": 18,
@@ -234,6 +248,8 @@ GET /api/rooms/{id}
   "meta": { "request_id": "req_7f3a91" }
 }
 ```
+
+`transcripts` 按 `sequence_no` 升序返回完整速记，供前端「往期演播厅」只读回放使用；`finished` 房间的 `summary` 即为主持人总结词。
 
 ---
 

@@ -140,7 +140,7 @@ backend\venv\Scripts\pytest backend/tests/test_e2e.py -k persistence -v
 
 ## 6. 质量门禁与常见问题
 
-**门禁**：提交前 `pytest backend/tests -q` 必须退出码为 0 且输出 `8 passed`。
+**门禁**：提交前 `pytest backend/tests -q` 必须退出码为 0 且输出 `8 passed`；前端改动还需通过 `npm --prefix frontend run build`。
 
 | 现象 | 原因与处理 |
 | --- | --- |
@@ -148,3 +148,38 @@ backend\venv\Scripts\pytest backend/tests/test_e2e.py -k persistence -v
 | 异步用例被跳过或报 strict 错误 | 缺少 `@pytest.mark.asyncio`；本项目 strict 模式要求显式标注 |
 | `database is locked` | 测试使用独立临时库，正常不会发生；若手工并发运行 seed 与后端，等待写事务结束后重试 |
 | `LF will be replaced by CRLF` | Windows 下 Git 行尾提示，不影响测试与运行 |
+
+---
+
+## 7. 手动验收清单（回放与真实模型）
+
+自动化测试覆盖调度、洞察提炼与 SSE 主链路；以下 UI 能力需按清单人工复验。启动方式见 [README](../README.md) 第 3 节。
+
+### 7.1 往期演播厅与只读回放
+
+| 步骤 | 操作 | 预期结果 |
+| --- | --- | --- |
+| 1 | 打开 `http://127.0.0.1:5173`，点击顶栏「往期演播厅」 | 右侧抽屉打开，展示 5 张卡片 |
+| 2 | 检查卡片内容 | 每张均含议题、专家人数、完成时间与「已结题」标签 |
+| 3 | 点击任意卡片 | 抽屉关闭，顶栏显示「只读回放」，速记区显示 `REPLAY` 徽章 |
+| 4 | 检查回放内容 | 1 主持 + 4 专家、10 条对白 + 1 条总结陈词、共识/分歧看板均非空 |
+| 5 | 点击「查看总结词」 | 总结卡片正常弹出，正文无 `{}`、反引号或 `"summary"` |
+| 6 | 点击「基于此议题重新推演」 | 创建新房间并进入 `LIVE`，对白持续流式增长 |
+
+### 7.2 实时讨论主链路
+
+1. 点击「发起新讨论」→ 输入议题 → 选择 3/4/5 位专家 → 生成阵容。
+2. 确认阵容后观察：专家状态在 `idle / thinking / speaking` 间切换；对白逐字增长；看板每 3 次发言刷新。
+3. 点击「主持人总结」或等待自动收束：总结卡片出现，房间状态变为「已总结」。
+4. 重新打开「往期演播厅」：新增的已结题房间应出现在列表顶部附近。
+
+### 7.3 真实 DeepSeek 与降级判定
+
+| 场景 | 判定方式 | 预期 |
+| --- | --- | --- |
+| 已配置有效 Key | 后端启动日志 | 出现 `已启用真实大模型调用：deepseek-chat @ https://api.deepseek.com` |
+| 真实调用成功 | 后端日志 / 阵容内容 | 出现 `POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"`，专家姓名与立场随议题变化 |
+| Key 为空或占位符 | 后端启动日志 | 出现 Mock 演示模式提示，创建房间返回 `meta.degraded = true` |
+| Key 失效或网络异常 | 后端日志 | 记录调用失败警告并自动降级，前端仍能完整完成讨论 |
+
+> 修改 `backend/.env` 后必须重启后端；`--reload` 只监听 Python 文件，不会重新加载环境变量。

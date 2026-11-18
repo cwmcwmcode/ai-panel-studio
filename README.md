@@ -19,6 +19,9 @@ AI Panel Studio 是一款面向深度观点讨论的 Web 应用 MVP。它不是�
 | 自然语言总结 | 达到预设轮次后，主持人输出一段去 JSON 化、可直接上屏的纯自然语言陈词 |
 | 独立状态小窗 | 每位专家拥有 idle / thinking / speaking 呼吸灯，仅展示 15 字以内公开摘要，不暴露思维链 |
 | 多房间并发隔离 | 以 `room_id` 为键隔离运行态、历史与广播队列，多场讨论可同时进行互不干扰 |
+| 往期演播厅回放 | 5 场预置经典讨论以卡片归档，点击即可只读回看完整对白、专家小窗、共识分歧与总结词 |
+| 议题克隆重演 | 已结题房间提供「基于此议题重新推演」，一键克隆议题、重新生成阵容并进入实时讨论 |
+| 真实大模型可插拔 | 配置 DeepSeek Key 即全量真实生成；Key 缺失、仍为占位符或网络异常时自动降级 Mock |
 
 ---
 
@@ -65,7 +68,11 @@ uvicorn app.main:app --port 8000 --reload
 
 - 服务地址：`http://127.0.0.1:8000`，健康检查：`GET /health`
 - 数据库文件：`backend/data/panel_studio.db`，首次启动自动建表
-- 大模型配置：可复制 `backend/.env.example` 为 `backend/.env` 填入 `LLM_API_KEY`；**留空则自动进入 Mock 流式演示模式**，无需网络即可体验完整打字机交互
+- 大模型配置：复制 `backend/.env.example` 为 `backend/.env`，填入 `LLM_API_KEY`，并按需设置：
+  - `LLM_BASE_URL=https://api.deepseek.com`
+  - `LLM_MODEL=deepseek-chat`
+
+  填入有效 Key 后，阵容生成、流式交锋、共识提炼与总结均调用真实 DeepSeek；**Key 留空、仍是占位符或调用异常时自动降级为 Mock**，无需网络也能完整演示
 
 ### 3.2 前端
 
@@ -77,13 +84,27 @@ npm run dev
 
 浏览器访问 `http://127.0.0.1:5173`。Vite 已将 `/api` 代理到 `http://127.0.0.1:8000`，后端同时开启 CORS，形成双保险。
 
-### 3.3 一键验收
+### 3.3 5 场预置讨论怎么看
+
+1. 打开演播厅后点击顶栏 **「往期演播厅」**。
+2. 抽屉列出 5 场「已结题」讨论，卡片含议题、专家人数与完成时间。
+3. 点击任意卡片进入 `REPLAY` 只读回放：完整对白流、专家小窗、共识/分歧看板与主持人总结词。
+4. 点击 **「基于此议题重新推演」** 可克隆该议题，生成新阵容并进入实时讨论。
+
+样例数据幂等灌入：
+
+```bash
+backend\venv\Scripts\python backend/scripts/seed_data.py
+```
+
+### 3.4 一键验收
 
 ```bash
 backend\venv\Scripts\pytest backend/tests -q
+npm --prefix frontend run build
 ```
 
-预期输出 `8 passed`。测试细节见 [docs/TESTING.md](docs/TESTING.md)。
+预期输出 `8 passed` 且前端构建成功。测试细节见 [docs/TESTING.md](docs/TESTING.md)。
 
 ---
 
@@ -97,7 +118,7 @@ backend\venv\Scripts\pytest backend/tests -q
 | --- | --- | --- |
 | `GET` | `/api/rooms` | 房间列表，支持 `status`、`page`、`page_size` |
 | `POST` | `/api/rooms` | 创建议题并生成 1 主持 + N 专家阵容 |
-| `GET` | `/api/rooms/{room_id}` | 房间详情：阵容、进度、最新共识/分歧看板 |
+| `GET` | `/api/rooms/{room_id}` | 房间详情：阵容、完整速记、进度、最新共识/分歧看板 |
 | `POST` | `/api/rooms/{room_id}/start` | 启动讨论，返回 SSE 订阅地址 |
 | `POST` | `/api/rooms/{room_id}/finish` | 提前收束，触发主持人总结 |
 | `GET` | `/health` | 健康检查 |
@@ -147,13 +168,15 @@ data: {"room_id":1,"persona_id":3,"sequence_no":12,"speech_type":"counter","delt
 - **去 JSON 化清洗**：正则 + 解析器 + 降级容错，总结词 100% 纯自然语言，对白零控制字符，公开摘要 ≤ 15 字
 - **多房间并发隔离**：`room_id` 维度独立队列与运行态，双房间并发事件零错配
 - **5 组高质量预置数据**：覆盖科技伦理、商业战略、教育科技、劳动力市场、前沿哲学，一键灌库即可展示
-- **演播厅前端**：三栏全屏布局、打字机、自动吸底、呼吸灯、看板平滑刷新、总结大卡片
+- **往期演播厅**：5 场已结题讨论卡片化归档，支持只读回放完整对白、看板与总结，并可按原议题重新推演
+- **真实大模型接入**：DeepSeek `deepseek-chat` 全量真实调用（阵容 / 交锋 / 洞察 / 总结），异常自动降级 Mock
+- **演播厅前端**：三栏全屏布局、打字机、自动吸底、呼吸灯、看板平滑刷新、总结大卡片、回放/实时双模式
 
 ### 5.2 未来演进
 
 - **语音合成（TTS）**：为每位角色绑定音色，把文字流转化为播音级双工对白，形成可听的圆桌节目
 - **用户中途举手插话**：开放人类席位，支持在讨论进行中举手加入、补充观点或直接反驳某位专家
-- 其他方向：讨论回放与时间轴、角色人格模板库、多模态议题材料（文档/图表）导入
+- 其他方向：讨论时间轴拖动、角色人格模板库、多模态议题材料（文档/图表）导入
 
 ---
 
@@ -167,4 +190,5 @@ data: {"room_id":1,"persona_id":3,"sequence_no":12,"speech_type":"counter","delt
 | [docs/TESTING.md](docs/TESTING.md) | 测试分层、覆盖范围与运行指南 |
 | [docs/WORKFLOW_REVIEW.md](docs/WORKFLOW_REVIEW.md) | 开发过程复盘与 AI 协同工作流 |
 | [docs/PROMPT_LOG.md](docs/PROMPT_LOG.md) | 各阶段原始 Prompt 与设计意图记录 |
+| [DELIVERY_CHECKLIST.md](DELIVERY_CHECKLIST.md) | 启动、验收与交付物对账手册 |
 | [backend/schema.sql](backend/schema.sql) | SQLite 数据库基线脚本 |
